@@ -1,0 +1,1528 @@
+---
+title: 'Project '
+subtitle: Monika Kaczan, Katarzyna Jalbrzykowska
+date: "05 June 2022"
+output:
+  word_document:
+    toc: yes
+    toc_depth: '4'
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    toc: yes
+    toc_float:
+      toc_collapsed: yes
+    toc_depth: 4
+    number_sections: no
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align="center")
+# Libraries
+
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(lubridate)
+library(xts)
+library(dygraphs)
+library(caret)
+library(car)
+library(tibble)
+library(purrr)
+library(corrplot)
+library(DescTools)
+library(magrittr)
+library(olsrr)
+library(stats)
+library(forecast)
+library(forcats)
+library(glmnet)
+library(AER)
+library(lmtest)
+library(nnet)
+library(pROC)
+library(ROSE)
+library(janitor)
+library(DMwR)
+library(bestNormalize)
+library(Information)
+library(smbinning)
+library(lattice)
+library(woeBinning)
+library(tidyr)
+library(gridExtra)
+
+# install.packages('remotes')
+# remotes::install_github('cran/DMwR')
+
+```
+
+
+## Classification: drugs
+
+### Data preparation
+
+#### General
+
+Firstly, we loaded the data, checked how they look like and whether there are any missing observations. We dropped the id column.
+
+```{r message=FALSE, warning=FALSE}
+drugs <- read_csv("drugs_train.csv")
+drugs_to_test <- read_csv("drugs_test.csv")
+any(is.na(drugs))
+drugs <- subset(drugs, select = -c(id) )
+glimpse(drugs)
+```
+
+
+#### Ordinal and categorical variables 
+
+As ordinal and categorical variables are stored as characters, we needed to convert it to factors.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+drugs$gender = factor(drugs$gender, levels = c("male", "female"), ordered = TRUE)
+drugs$consumption_cocaine_last_month = factor(drugs$consumption_cocaine_last_month, levels = c("No", "Yes"), ordered = TRUE)
+```
+
+Most people are either from Australia or USA. Other countries (Canada, Ireland, UK and New Zeland) all have under 10% of representation. Therefore we decided to include them as "Other". 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+table(drugs$country)
+drugs$country[drugs$country %in% c("Canada","Ireland", "UK", "New Zealand")] <- "Other"
+drugs$country <- as.factor(drugs$country)
+```
+
+Over 90% of observations are Mixed-Black/Asian which suggest that our data is quite homogeneous. Therefore we decided to drop variable ethnicity from our data.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+table(drugs$ethnicity)
+drugs <- subset(drugs, select = -c(ethnicity) )
+```
+
+Some categories describing age and consumption of different drugs have very few observations compared to others. This is why we decided to merge selected categories which we believed presented similar data. This includes:  
+- merging Canada, Ireland, UK and New Zealand to 'Other' in variable 'country'  
+- merging 55-64 and 65+ categories for 'age'  
+- merging all 'Left school before...' categories for 'education' as well as merge 'Masters degree' and 'Doctorate degree'  
+- merging 'never used' and 'used over a decade ago' as well as 'used in last day' and 'used in last week' categories for all consumption variables.  
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+table(drugs$age)
+drugs$age[drugs$age == "65+"] <- "55-64"
+drugs$age[drugs$age == "55-64"] <- "55+"
+drugs$age <- factor(drugs$age, 
+                    levels = c("18-24", "25-34", "35-44", "45-54", "55+"),
+                    ordered = TRUE)
+drugs$age <- droplevels(drugs$age)
+
+table(drugs$education)
+drugs$education[drugs$education == "Left school before 16 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Left school at 16 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Left school at 17 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Left school at 18 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Masters degree"] <- "Masters degree or higher"
+drugs$education[drugs$education == "Doctorate degree"] <- "Masters degree or higher"
+table(drugs$education)
+drugs$education <- factor(drugs$education,
+                          levels = c("Left school at/before 18 years",
+                                     "Some college or university, no certificate or degree",
+                                     "Professional certificate/ diploma",
+                                     "University degree",
+                                     "Masters degree or higher"),
+                          ordered = TRUE)
+drugs$education <- droplevels(drugs$education)
+
+table(drugs$consumption_alcohol) # Here we changed variables names
+drugs$consumption_alcohol <- factor(drugs$consumption_alcohol,
+                                    levels = c("never used",
+                                               "used over a decade ago",
+                                               "used in last decade",
+                                               "used in last year",
+                                               "used in last month",
+                                               "used in last week", 
+                                               "used in last day"),
+                                    ordered = TRUE)
+drugs$consumption_amphetamines <- factor(drugs$consumption_amphetamines,
+                                         levels = c("never used",
+                                                    "used over a decade ago",
+                                                    "used in last decade",
+                                                    "used in last year",
+                                                    "used in last month",
+                                                    "used in last week", 
+                                                    "used in last day"),
+                                         ordered = TRUE)
+drugs$consumption_caffeine <- factor(drugs$consumption_caffeine,
+                                     levels = c("never used",
+                                                "used over a decade ago",
+                                                "used in last decade",
+                                                "used in last year",
+                                                "used in last month",
+                                                "used in last week", 
+                                                "used in last day"),
+                                     ordered = TRUE)
+drugs$consumption_cannabis <- factor(drugs$consumption_cannabis,
+                                     levels = c("never used",
+                                                "used over a decade ago",
+                                                "used in last decade",
+                                                "used in last year",
+                                                "used in last month",
+                                                "used in last week", 
+                                                "used in last day"),
+                                     ordered = TRUE)
+drugs$consumption_chocolate <- factor(drugs$consumption_chocolate,
+                                      levels = c("never used",
+                                                 "used over a decade ago",
+                                                 "used in last decade",
+                                                 "used in last year",
+                                                 "used in last month",
+                                                 "used in last week", 
+                                                 "used in last day"),
+                                      ordered = TRUE)
+drugs$consumption_mushrooms <- factor(drugs$consumption_mushrooms,
+                                      levels = c("never used",
+                                                 "used over a decade ago",
+                                                 "used in last decade",
+                                                 "used in last year",
+                                                 "used in last month",
+                                                 "used in last week", 
+                                                 "used in last day"),
+                                      ordered = TRUE)
+drugs$consumption_nicotine <- factor(drugs$consumption_nicotine,
+                                     levels = c("never used",
+                                                "used over a decade ago",
+                                                "used in last decade",
+                                                "used in last year",
+                                                "used in last month",
+                                                "used in last week", 
+                                                "used in last day"),
+                                     ordered = TRUE)
+
+drugs$consumption_alcohol[drugs$consumption_alcohol == "never used"] <- "used over a decade ago"
+drugs$consumption_alcohol[drugs$consumption_alcohol == "used in last day"] <- "used in last week"
+drugs$consumption_alcohol <- droplevels(drugs$consumption_alcohol)
+
+drugs$consumption_amphetamines[drugs$consumption_amphetamines == "never used"] <- "used over a decade ago"
+drugs$consumption_amphetamines[drugs$consumption_amphetamines == "used in last day"] <- "used in last week"
+drugs$consumption_amphetamines <- droplevels(drugs$consumption_amphetamines)
+
+drugs$consumption_caffeine[drugs$consumption_caffeine == "never used"] <- "used over a decade ago"
+drugs$consumption_caffeine[drugs$consumption_caffeine == "used in last day"] <- "used in last week"
+drugs$consumption_caffeine <- droplevels(drugs$consumption_caffeine)
+
+drugs$consumption_cannabis[drugs$consumption_cannabis == "never used"] <- "used over a decade ago"
+drugs$consumption_cannabis[drugs$consumption_cannabis == "used in last day"] <- "used in last week"
+drugs$consumption_cannabis <- droplevels(drugs$consumption_cannabis)
+
+drugs$consumption_chocolate[drugs$consumption_chocolate == "never used"] <- "used over a decade ago"
+drugs$consumption_chocolate[drugs$consumption_chocolate == "used in last day"] <- "used in last week"
+drugs$consumption_chocolate <- droplevels(drugs$consumption_chocolate)
+
+drugs$consumption_mushrooms[drugs$consumption_mushrooms == "never used"] <- "used over a decade ago"
+drugs$consumption_mushrooms[drugs$consumption_mushrooms == "used in last day"] <- "used in last week"
+drugs$consumption_mushrooms <- droplevels(drugs$consumption_mushrooms)
+
+drugs$consumption_nicotine[drugs$consumption_nicotine == "never used"] <- "used over a decade ago"
+drugs$consumption_nicotine[drugs$consumption_nicotine == "used in last day"] <- "used in last week"
+drugs$consumption_nicotine <- droplevels(drugs$consumption_nicotine)
+```
+
+We also checked relationship between the dependend variable (consumption_cocaine_last_month) and different consumptions of drugs and other products using Cramer V. We noticed that the Cramer's V is very low for caffeine. Model estimated later with this variable had indicated that caffeine have very low Information Values (< 0.01) and is not statistically significant. Additionaly, caffeine is a common drug which everybody uses so it likely have no linkedge to the consumption of cocaine. Based on that, we decided to drop it from the model.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+DescTools::CramerV(drugs$consumption_cocaine_last_month,
+                   drugs$consumption_caffeine)
+drugs <- subset(drugs, select = -c(consumption_caffeine))
+```
+
+
+#### Numeric variables
+
+All numeric variables except sensation and impulsiveness have pretty normal distribution. We checked their distribution using histograms and boxplots. 
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par( mfrow= c(1,2) )
+hist(drugs$personality_sensation)
+hist(drugs$personality_impulsiveness)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par( mfrow= c(2,2) )
+boxplot(personality_agreeableness ~ consumption_cocaine_last_month, 
+        data = drugs)
+boxplot(personality_sensation ~ consumption_cocaine_last_month,  
+        data = drugs)
+boxplot(personality_neuroticism ~ consumption_cocaine_last_month,  
+        data = drugs)
+boxplot(personality_extraversion ~ consumption_cocaine_last_month, 
+        data = drugs)
+par( mfrow= c(2,2) )
+boxplot(personality_conscientiousness ~ consumption_cocaine_last_month,  
+        data = drugs)
+boxplot(personality_impulsiveness ~ consumption_cocaine_last_month,  
+        data = drugs)
+boxplot(personality_openness ~ consumption_cocaine_last_month,  
+        data = drugs)
+par( mfrow= c(1,1) )
+```
+
+
+To reduce possible overfitting of the model, we decided to transform numerical variables related to personality. The reason of that is the fact those personality traits are generally hard to measure and the fact that somebody got let's say 42.5 and not 47.9 might not be statistically important. Therefore we decided to transform those variables based cut-off points: under 35 point would indicate that this personality trait is weak, between 35 and 65 points that character trait is neutral, and above 65 that it is strong.  
+We also tried out other options, such as transforming those variables to 2 or 5 levels based on quantiles or transforming to different number of levels based on hard cut off points. However, we found out that these cut-off points give the best results in terms of ROC, Sensibility, Accuracy and Kappa.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+drugs$personality_neuroticism <- ifelse(drugs$personality_neuroticism < 35, 0, ifelse(drugs$personality_neuroticism < 65, 1, 2))
+drugs$personality_openness <- ifelse(drugs$personality_openness < 35, 0, ifelse(drugs$personality_openness < 65, 1, 2))
+drugs$personality_agreeableness <- ifelse(drugs$personality_agreeableness < 35, 0, ifelse(drugs$personality_agreeableness < 65, 1, 2))
+drugs$personality_extraversion <- ifelse(drugs$personality_extraversion < 35, 0, ifelse(drugs$personality_extraversion < 65, 1, 2))
+drugs$personality_conscientiousness <- ifelse(drugs$personality_conscientiousness < 35, 0, ifelse(drugs$personality_conscientiousness < 65, 1, 2))
+drugs$personality_impulsiveness <- ifelse(drugs$personality_impulsiveness < 35, 0, ifelse(drugs$personality_impulsiveness < 65, 1, 2))
+drugs$personality_sensation <- ifelse(drugs$personality_sensation < 35, 0, ifelse(drugs$personality_sensation < 65, 1, 2))
+drugs[, 5:11] <- lapply(drugs[, 5:11], factor)
+```
+
+
+
+
+### Balancing sample 
+
+One of the problems with the sample is that it is unbalanced - our dependend variable, consuption of cocaine in the last month, takes value "Yes" in only 9.24% of observations. It means that prediction of this value will be a subject to much bigger error.
+
+```{r message=FALSE, warning=FALSE}
+table(drugs$consumption_cocaine_last_month)
+```
+
+This is why we decided to balance the sample. We compared 3 different methods: weighning observations, upsampling and SMOTE.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+fiveStats <- function(...) c(twoClassSummary(...), 
+                             defaultSummary(...))
+source("functions/F_own_summary_functions.R")
+```
+
+For model validation we are splitting the data into train and test samples: 1100 observations for training and 400 for test. Additionaly, we are using cross-validation on the training sample. Here in each case we are using 5-fold cross-validation repeated 3 times.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(987654321)
+drugs_which_training <- createDataPartition(drugs$consumption_cocaine_last_month,
+                                            p = 1099/1500, 
+                                            list = FALSE) 
+
+drugs_train <- drugs[c(drugs_which_training),]
+drugs_test <- drugs[-c(drugs_which_training),]
+
+ctrl_cv5 <- trainControl(method = "repeatedcv",
+                         number = 5,
+                         classProbs = TRUE,
+                         summaryFunction = mySummary,
+                         repeats = 3)
+
+```
+
+####  Basic model
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(0)
+
+drugs_logit_train <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train,
+        method = "glm",
+        family = "binomial",
+        trControl = ctrl_cv5)
+summary(drugs_logit_train)
+drugs_logit_train
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(0)
+drugs_logit_train
+```
+
+
+#### Weightning observations
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+(freqs <- table(drugs_train$consumption_cocaine_last_month))
+
+myWeights <- ifelse(drugs_train$consumption_cocaine_last_month == "Yes",
+                    0.5/freqs[2], 
+                    0.5/freqs[1]) * nrow(drugs_train)
+
+tabyl(myWeights)
+
+sum(myWeights) == nrow(drugs_train)
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(987654321)
+
+drugs_logit_train_weighted <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train,
+        method = "glm",
+        family = "binomial",
+        trControl = ctrl_cv5,
+        weights = myWeights)
+
+drugs_logit_train_weighted
+```
+
+
+
+#### Upsampling 
+
+We use upsampling (and not downsampling) because the number of observations is not large.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+ctrl_cv5$sampling <- "up"
+
+set.seed(987654321)
+
+drugs_logit_train_up <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train,
+        method = "glm",
+        family = "binomial",
+        trControl = ctrl_cv5
+        )
+
+drugs_logit_train_up
+```
+
+
+
+#### SMOTE model 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+ctrl_cv5$sampling <- "smote"
+
+set.seed(987654321)
+
+drugs_logit_train_smote <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train,
+        method = "glm",
+        family = "binomial",
+        trControl = ctrl_cv5
+  )
+
+drugs_logit_train_smote
+
+```
+
+
+#### Comparison
+
+We are choosing upsampling model based on the highest Accuracy and relatively high other performance measures on the train data.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+models_all <- ls(pattern = "drugs_logit_train")
+
+sapply(models_all,
+       function(x) (get(x))$results[,2:6]) %>% 
+  t()
+
+source("functions/F_summary_binary_class.R")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+models_all %>% 
+  sapply(function(x) get(x) %>% 
+           predict(newdata = drugs_train) %>% 
+           summary_binary_class(level_positive = "Yes",
+                                level_negative = "No",
+                                real = drugs_train$consumption_cocaine_last_month)) %>% 
+  t()
+```
+
+
+
+
+
+
+
+### Logit and probit
+
+Logit and probit are two main regression models for classification.  
+
+Let's focus on the logistic regression model we estimated with upsampling.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+ctrl_cv5_logit <- trainControl(method = "repeatedcv",
+                         number = 5,
+                         classProbs = TRUE,
+                         summaryFunction = mySummary,
+                         repeats = 3)
+ctrl_cv5_logit$sampling <- "up"
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(987654321)
+drugs_logit_train_final <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train,
+        method = "glm",
+        family = "binomial",
+        trControl = ctrl_cv5_logit)
+```
+
+We see that most variables are statistically significant. We decided not to delete or add variables at this point.
+
+```{r message=FALSE, warning=FALSE}
+summary(drugs_logit_train_final)
+drugs_logit_train_final
+```
+
+We also tried the probit model.  
+
+```{r message=FALSE, warning=FALSE}
+set.seed(987654321)
+drugs_probit_train_final <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train,
+        method = "glm",
+        family = binomial(link = "probit"),
+        trControl = ctrl_cv5_logit)
+drugs_probit_train_final
+
+summary(drugs_probit_train_final)
+drugs_probit_train_final
+```
+
+### KNN 
+
+KNN (k nearest neighbours) is a supervised learning method in which (in case of classification) the object is being assigned to the class most common among its k nearest neighbors. Here we try out different values of k from 1 to 40 by 2 and select the best one.
+
+```{r message=FALSE, warning=FALSE}
+ctrl_cv5_knn <- trainControl(method = "repeatedcv",
+                         number = 5,
+                         classProbs = TRUE,
+                         summaryFunction = mySummary,
+                         repeats = 3)
+ctrl_cv5_knn$sampling <- "up"
+
+different_k = data.frame(k = seq(1, 40, 2) )
+
+set.seed(987654321)
+drugs_knn_train <- 
+  train(consumption_cocaine_last_month ~ .,
+        drugs_train,        
+        method = "knn",
+        metric = "ROC",
+        trControl = ctrl_cv5_knn,
+        tuneGrid = different_k,
+        preProcess = c("range"))
+
+drugs_knn_train
+plot(drugs_knn_train)
+```
+
+Taking ROC into account, the best model is with k = 39. It has also relatively high Balanced Accuracy.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+k_value <- data.frame(k = 39)
+
+set.seed(987654321)
+drugs_knn_train_final <- 
+  train(consumption_cocaine_last_month ~ .,
+        drugs_train,        
+        method = "knn",
+        metric = "ROC",
+        trControl = ctrl_cv5_knn,
+        tuneGrid = k_value,
+        preProcess = c("range"))
+
+drugs_knn_train_final
+```
+
+### SVM
+
+SVM (support-vector machine) is a supervised learning model which maps training examples to points in space so as to maximise the width of the gap between the two categories.  
+
+Here we are running SVM with radial basis kernel (gaussian).
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+ctrl_cv5_svm <- trainControl(method = "cv",
+                         number = 5,
+                         classProbs = TRUE)
+ctrl_cv5_svm$sampling <- "up"
+
+parametersC_sigma <- 
+  expand.grid(C = c(0.01, 0.1, 1, 5, 10),
+              sigma = c(0.01, 0.1, 1, 5, 10))
+set.seed(987654321)
+drugs_svm_train <- train(consumption_cocaine_last_month ~ ., 
+                           data = drugs_train, 
+                           method = "svmRadial",
+                           tuneGrid = parametersC_sigma,
+                           trControl = ctrl_cv5_svm)
+drugs_svm_train
+
+```
+
+The best accuracy for sigma = 10 and C = 0.01, but Kappa is 0.11. Therefore we would probably choose C = 1 and sigma = 0.01 which has Accuracy almost as high but Kappa of 0.23.  
+
+We wanted to also try out polynomial kernel.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+svm_parametersPoly <- expand.grid(C = c(0.01, 1),
+                                  degree = 2:5, 
+                                  scale = c(1,10))
+set.seed(987654321)
+drugs_svm_train2 <- train(consumption_cocaine_last_month ~ ., 
+                         data = drugs_train, 
+                         method = "svmPoly",
+                         tuneGrid = svm_parametersPoly,
+                         trControl = ctrl_cv5_svm)
+drugs_svm_train2
+```
+
+Here Accuracy is similiarly high as with the gaussian kernel but all Kappa are quite low. We would probably want to reject those cases. Therefore, our final SVM model is with gaussian kernel with parameters C = 1 and sigma = 0.01.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+parametersC_sigma_final <- 
+  expand.grid(C = c(1), sigma = c(0.01))
+set.seed(987654321)
+drugs_svm_train_final <- train(consumption_cocaine_last_month ~ ., 
+                          data = drugs_train, 
+                          method = "svmRadial",
+                          tuneGrid = parametersC_sigma_final,
+                          trControl = ctrl_cv5_svm)
+drugs_svm_train_final
+```
+
+
+### Model comparison and selection
+
+To select the best model, we compared performance of logit, probit, KNN and SVM models on training, test and general (combined training and test) samples using different performance measures.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+logit_fitted = predict(drugs_logit_train_final, drugs_train)
+logit_results = summary_binary_class(predicted_classes = logit_fitted,
+                                     real = drugs_train$consumption_cocaine_last_month)
+logit_fitted_test = predict(drugs_logit_train_final, drugs_test)
+logit_results_test = summary_binary_class(predicted_classes = logit_fitted_test,
+                                     real = drugs_test$consumption_cocaine_last_month)
+logit_fitted_all = predict(drugs_logit_train_final, drugs)
+logit_results_all = summary_binary_class(predicted_classes = logit_fitted_all,
+                                       real = drugs$consumption_cocaine_last_month)
+
+probit_fitted = predict(drugs_probit_train_final, drugs_train)
+probit_results = summary_binary_class(predicted_classes = probit_fitted,
+                                     real = drugs_train$consumption_cocaine_last_month)
+probit_fitted_test = predict(drugs_probit_train_final, drugs_test)
+probit_results_test = summary_binary_class(predicted_classes = probit_fitted_test,
+                                      real = drugs_test$consumption_cocaine_last_month)
+probit_fitted_all = predict(drugs_probit_train_final, drugs)
+probit_results_all = summary_binary_class(predicted_classes = probit_fitted_all,
+                                       real = drugs$consumption_cocaine_last_month)
+
+knn_fitted = predict(drugs_knn_train_final, drugs_train)
+knn_results = summary_binary_class(predicted_classes = knn_fitted,
+                                      real = drugs_train$consumption_cocaine_last_month)
+knn_fitted_test = predict(drugs_knn_train_final, drugs_test)
+knn_results_test = summary_binary_class(predicted_classes = knn_fitted_test,
+                                   real = drugs_test$consumption_cocaine_last_month)
+knn_fitted_all = predict(drugs_knn_train_final, drugs)
+knn_results_all = summary_binary_class(predicted_classes = knn_fitted_all,
+                                       real = drugs$consumption_cocaine_last_month)
+
+svm_fitted = predict(drugs_svm_train_final, drugs_train)
+svm_results = summary_binary_class(predicted_classes = svm_fitted,
+                                   real = drugs_train$consumption_cocaine_last_month)
+svm_fitted_test = predict(drugs_svm_train_final, drugs_test)
+svm_results_test = summary_binary_class(predicted_classes = svm_fitted_test,
+                                   real = drugs_test$consumption_cocaine_last_month)
+svm_fitted_all = predict(drugs_svm_train_final, drugs)
+svm_results_all = summary_binary_class(predicted_classes = svm_fitted_all,
+                                        real = drugs$consumption_cocaine_last_month)
+
+comparison <- matrix(12:7, nrow = 12, ncol = 7)
+rownames(comparison) <- c("logit_train", "probit_train", "knn_train", "svm_train", "logit_test", "probit_test", "knn_test", "svm_test", "logit_all", "probit_all", "knn_all", "svm_all") 
+colnames(comparison) <- c("Accuracy", "Sensitivity", "Specificity", "Pos Pred Value", "Neg Pred Value", "F1", "BALANCED ACCURACY")
+comparison[1, ] <- logit_results
+comparison[2, ] <- probit_results
+comparison[3, ] <- knn_results
+comparison[4, ] <- svm_results
+comparison[5, ] <- logit_results_test
+comparison[6, ] <- probit_results_test
+comparison[7, ] <- knn_results_test
+comparison[8, ] <- svm_results_test
+comparison[9, ] <- logit_results_all
+comparison[10, ] <- probit_results_all
+comparison[11, ] <- knn_results_all
+comparison[12, ] <- svm_results_all
+comparison
+```
+
+###### SVM
+Overall, we found out that SVM quality heavily depends on the parameters which are hard to specify (due to, among others, bigger computational power needed to estimate different combinations of parameters). SVM model validation on training and test samples is drastically different and much worse on the test sample. Therefore we do not consider this algorithm.
+
+###### Logit and Probit
+Logit performance is almost identical to the Probit one. However, logit performs slightly better on the training sample in terms of balanced accuracy (which will be eveluated) so out of those two we would choose Logit. Therefore, the choice boils down to Logit VS KNN.
+
+###### Logit VS KNN
+The choice of Logit vs KNN is hard as in different cases one performs better than the other. For example, KNN performs worse than Logit on the training sample in terms of Balanced Accuracy, but better on the test sample. As test sample performance should be more reliable in terms of simulating evalueation data, we would like to go with KNN as our final model. 
+
+###### Final model: KNN with k = 39
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+write.csv(knn_fitted_test,"knn_test_predictions.csv", row.names = FALSE)
+```
+
+
+## Regression - drugs dataset
+
+### Data preparation
+
+#### General
+
+In the first step, we loaded the data. Then they were checked if any missing observations are present within the data. We also analyzed the structure and type of the variables.
+
+```{r message=FALSE, warning=FALSE}
+traffic_train=read.csv(file="traffic_train.csv",sep=",",header=TRUE)
+traffic_test=read.csv(file="traffic_test.csv",sep=",",header=TRUE)
+
+head(traffic_train,2)
+```
+
+```{r message=FALSE, warning=FALSE}
+colSums(is.na(traffic_train)) %>% sort()
+```
+
+There were no missing data.
+
+The first column - the date of observation with an accuracy of an hour was converted to the datetime data type.
+
+```{r message=FALSE, warning=FALSE}
+traffic_train$DateT <- as.POSIXct(traffic_train$date_time, format="%Y-%m-%d %H:%M:%S", tz="GMT")
+traffic_test$DateT <- as.POSIXct(traffic_test$date_time, format="%Y-%m-%d %H:%M:%S", tz="GMT")
+```
+
+The data showed a very large variability in traffic due to daily fluctuations.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_train_xts <- xts(traffic_train$traffic, order.by = traffic_train$DateT)
+dygraph(traffic_train_xts) %>% dyRangeSelector(height = 40)
+```
+
+Instead of using the index column, we created features describing each time characteristic: hour, month, year, yearweek (which might represent information about holidays), weekday, weekend and date.
+
+```{r message=FALSE, warning=FALSE}
+traffic_train$time <- format(traffic_train$DateT, format = "%H")
+traffic_train$month <- format(traffic_train$DateT, format = "%m")
+traffic_train$year <- format(traffic_train$DateT, format = "%Y")
+traffic_train$yearweek <- format(traffic_train$DateT, format = "%W")
+traffic_train$weekday <- format(traffic_train$DateT, format = "%w")
+traffic_train$weekend <- ifelse((traffic_train$weekday == 0)+(traffic_train$weekday == 6),"weekend","weekday")
+traffic_train$date <- format(traffic_train$DateT, format = "%Y-%m-%d")
+
+traffic_test$time <- format(traffic_test$DateT, format = "%H")
+traffic_test$month <- format(traffic_test$DateT, format = "%m")
+traffic_test$year <- format(traffic_test$DateT, format = "%Y")
+traffic_test$yearweek <- format(traffic_test$DateT, format = "%W")
+traffic_test$weekday <- format(traffic_test$DateT, format = "%w")
+traffic_test$weekend <- ifelse((traffic_test$weekday == 0)+(traffic_test$weekday == 6),"weekend","weekday")
+traffic_test$date <- format(traffic_test$DateT, format = "%Y-%m-%d")
+```
+
+Our train dataset covers the period between 2014-10-01 and 2018-12-31, consists of 1223 days, giving 29701 observations total.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+length(unique(traffic_train$date))
+c(min(traffic_train$date),max(traffic_train$date))
+nrow(traffic_train)
+```
+
+The weather conditions are described by two variables: weather_general and weather_detailed. The detailed feature includes 37 levels which are very similar to the general variable levels. In addition, some of the levels are very small, which could affect the results bias. For this reason, we have decided not to use the weather_detailed characteristic, which should also reduce possible overfitting of the model.
+
+```{r message=FALSE, warning=FALSE}
+table(traffic_train$weather_detailed)
+```
+
+All variables which were stored as characters were converted to factors.
+
+```{r message=FALSE, warning=FALSE}
+traffic_train$weather_general <- as.factor(traffic_train$weather_general)
+traffic_test$weather_general <- as.factor(traffic_test$weather_general)
+
+traffic_train$weekend <- as.factor(traffic_train$weekend)
+traffic_train$yearweek <- as.factor(traffic_train$yearweek)
+traffic_train$weekday <- as.factor(traffic_train$weekday)
+traffic_train$month <- as.factor(traffic_train$month)
+traffic_train$time <- as.factor(traffic_train$time)
+
+traffic_test$weekend <- as.factor(traffic_test$weekend)
+traffic_test$yearweek <- as.factor(traffic_test$yearweek)
+traffic_test$weekday <- as.factor(traffic_test$weekday)
+traffic_test$month <- as.factor(traffic_test$month)
+traffic_test$time <- as.factor(traffic_test$time)
+```
+
+We also changed the type of the variable Year to numeric.
+
+```{r message=FALSE, warning=FALSE}
+traffic_train$year <- as.numeric(traffic_train$year)
+traffic_test$year <- as.numeric(traffic_test$year)
+```
+
+For model validation and testing we split the data into train and test samples: 20368 observations for training and 9322 for test (68:32 ratio), this division is also time based, the test sample starts from the beginning if the year 2018.
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train <- traffic_train[traffic_train$year <= 2017,]
+traffic_train_test <- traffic_train[traffic_train$year >= 2018,]
+```
+
+#### Numeric variables
+
+We plotted the numeric variables' distributions using histograms and noticed that their distributions were highly skewed in most cases. Moreover the traffic distribution has multiple peaks, which makes even harder to model.
+
+```{r message=FALSE, warning=FALSE}
+summary(traffic_train_train$traffic)
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+g1 <-ggplot(traffic_train_train, aes(x = traffic)) + geom_histogram(fill = "grey", bins = 100) + theme_classic()
+g2 <-ggplot(traffic_train_train, aes(x=clouds_coverage_pct))+geom_histogram(fill="grey", bins = 100)+theme_classic()
+g3 <- ggplot(traffic_train_train, aes(x = temperature)) +geom_histogram(fill = "grey",bins = 100) + theme_classic()
+
+grid.arrange(g1,g2,g3,ncol=2)
+```
+
+Rainfall> 0 mm was observed only in 11% of our observations, and snowfall happened even less frequently, only in 0.2% of our observations.
+
+```{r message=FALSE, warning=FALSE, fig.height=3, echo=FALSE}
+g1 <- ggplot(traffic_train_train, aes(x = rain_mm)) + geom_histogram(fill = "grey", bins = 100) +theme_classic()
+g2 <- ggplot(traffic_train_train, aes(x = snow_mm)) + geom_histogram(fill = "grey", bins = 100) +theme_classic()
+grid.arrange(g1,g2,ncol=2)
+
+```
+
+```{r message=FALSE, warning=FALSE, results="hide", echo=FALSE}
+length(which(traffic_train_train$rain_mm!=0))/length(traffic_train_train$rain_mm)
+```
+
+```{r message=FALSE, warning=FALSE, results="hide", echo=FALSE}
+length(which(traffic_train_train$snow_mm!=0))/length(traffic_train_train$snow_mm)
+```
+
+#### Ordinal and categorical variables
+
+Most of the observations represent a good weather. However, we'll combine the similar events: "Smoke" and "Haze" levels and "Squall" and "Thunderstorm", which are usually very extreme weather events.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(traffic_train_train, aes(x = weather_general)) + geom_bar(fill = "grey")+ coord_flip()
+```
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train$weather_general2 <- traffic_train_train$weather_general
+traffic_train_train$weather_general2[traffic_train_train$weather_general2 == "Smoke"] <- "Haze"
+traffic_train_train$weather_general2[traffic_train_train$weather_general2 == "Squall"] <- "Thunderstorm"
+traffic_train_train$weather_general2 <- droplevels(traffic_train_train$weather_general2)
+
+traffic_train_test$weather_general2 <- traffic_train_test$weather_general
+traffic_train_test$weather_general2[traffic_train_test$weather_general2 == "Smoke"] <- "Haze"
+traffic_train_test$weather_general2[traffic_train_test$weather_general2 == "Squall"] <- "Thunderstorm"
+traffic_train_test$weather_general2 <- droplevels(traffic_train_test$weather_general2)
+
+traffic_test$weather_general2 <- traffic_test$weather_general
+traffic_test$weather_general2[traffic_test$weather_general2 == "Smoke"] <- "Haze"
+traffic_test$weather_general2[traffic_test$weather_general2 == "Squall"] <- "Thunderstorm"
+traffic_test$weather_general2 <- droplevels(traffic_test$weather_general2)
+```
+
+After checking the structure of the yearweek feature, we noticed that only a few observations were recorded in the yearweek no. 53, we combined this level with the no. 52.
+
+
+```{r message=FALSE, warning=FALSE}
+table(traffic_train_train$yearweek)
+```
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train$yearweek[traffic_train_train$yearweek == "53"] <- "52"
+traffic_train_train$yearweek <- droplevels(traffic_train_train$yearweek)
+
+traffic_train_test$yearweek[traffic_train_test$yearweek == "53"] <- "52"
+traffic_train_test$yearweek <- droplevels(traffic_train_test$yearweek)
+
+traffic_test$yearweek[traffic_test$yearweek == "53"] <- "52"
+traffic_test$yearweek <- droplevels(traffic_test$yearweek)
+```
+
+
+#### Removing outliers
+
+We found one outlier in our traffic dataset - with the temperature below -200C. We decided to remove this observation, as it was most likely an error.
+
+```{r message=FALSE, warning=FALSE}
+out_temp <- which(traffic_train_train$temperature > -200)
+traffic_train_train <- traffic_train_train[out_temp,]
+```
+
+### Feature engeneering
+
+To transform our positively skewed dependent variable to a relatively symmetrical distribution, we used a  Box-Cox transformation.
+
+```{r message=FALSE, warning=FALSE}
+traffic_boxcox <- boxcox(traffic_train_train$traffic +1, standardize = FALSE)
+```
+
+Our optimal lambda results:
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_boxcox$lambda
+```
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train$traffic_boxcox <- traffic_boxcox$x.t
+traffic_train_test$traffic_boxcox <- predict(traffic_boxcox, 
+                                             newdata = traffic_train_test$traffic)
+```
+
+We can compare the results of transformation below. Although The new distribution is not ideally symmetrical, the predictive power of our model should still improve.  
+
+```{r message=FALSE, warning=FALSE, fig.height=3, echo=FALSE}
+g1 <- ggplot(traffic_train_train,aes(x = traffic)) + geom_histogram(fill="grey",bins=100) + theme_classic()
+g2 <- ggplot(traffic_train_train,aes(x = traffic_boxcox)) + geom_histogram(fill="grey",bins=100) + theme_classic()
+grid.arrange(g1,g2,ncol=2)
+```
+
+We used the cut() function to divide the following variables into bigger groups: clouds_coverage_pct, months and time.
+
+As for the clouds_coverage_pct, we divided the observations into groups based on their quantiles: [0-1], (1-40], (4-75], (75-90], (90-100].
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train$clouds_pct_qntls <- 
+  cut(traffic_train_train$clouds_coverage_pct, 
+      breaks = quantile(traffic_train_train$clouds_coverage_pct, 
+                        probs = seq(0, 1, 0.2)),
+      include.lowest = TRUE)
+
+traffic_train_test$clouds_pct_qntls <- 
+  cut(traffic_train_test$clouds_coverage_pct, 
+      breaks= c(0,1,40,75,90,100), 
+      include.lowest = TRUE,
+      ordered_result = TRUE)
+
+traffic_test$clouds_pct_qntls <- 
+  cut(traffic_test$clouds_coverage_pct, 
+      breaks= c(0,1,40,75,90,100), 
+      include.lowest = TRUE,
+      ordered_result = TRUE)
+```
+
+Months were divided into the 4 natural seasons: spring, summer, fall and winter. We also checked if the months had similar traffic mean for each season.
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train %>% 
+  group_by(month) %>% 
+  summarise(AvgTraffic_bc=mean(traffic, na.rm=T),
+            Count=n()) %>% 
+  arrange(desc(AvgTraffic_bc))
+```
+
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_train_train$season <- as.numeric(as.character(traffic_train_train$month))
+traffic_train_train$season <- 
+  cut(traffic_train_train$season,
+      breaks= c(1,2,5,8,11,12),
+      include.lowest = TRUE,
+      right = TRUE,
+      labels=c("winter","spring","summer","fall","winter"),
+      ordered_result = FALSE)
+
+traffic_train_test$season <- as.numeric(as.character(traffic_train_test$month))
+traffic_train_test$season <- 
+  cut(traffic_train_test$season,
+      breaks= c(1,2,5,8,11,12),
+      include.lowest = TRUE,
+      right = TRUE,
+      labels=c("winter","spring","summer","fall","winter"),
+      ordered_result = FALSE)
+
+traffic_test$season <- as.numeric(as.character(traffic_test$month))
+traffic_test$season <- 
+  cut(traffic_test$season,
+      breaks= c(1,2,5,8,11,12),
+      include.lowest = TRUE,
+      right = TRUE,
+      labels=c("winter","spring","summer","fall","winter"),
+      ordered_result = FALSE)
+```
+
+The binning of the time feature was based on the graph and mean traffic values analysis.
+We decided to create five levels: "morning","midday","afternoon","evening" and "night", corresponding with the following hours: [6-10],[11-14],[15-17],[18-21],[22-5].
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train %>% 
+  group_by(time) %>% 
+  summarise(AvgTraffic_bc=mean(traffic, na.rm=T),
+            Count=n()) %>% 
+  arrange(desc(AvgTraffic_bc)) %>% print(n = Inf)
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_train_train$time2 <- as.numeric(as.character(traffic_train_train$time))
+traffic_train_train$time2 <- 
+  cut(traffic_train_train$time2,
+      breaks= c(0,6,11,15,18,22,24),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels=c("night","morning","midday","afternoon","evening","night"),
+      ordered_result = FALSE)
+
+traffic_train_test$time2 <- as.numeric(as.character(traffic_train_test$time))
+traffic_train_test$time2 <- 
+  cut(traffic_train_test$time2,
+      breaks= c(0,6,11,15,18,22,24),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels=c("night","morning","midday","afternoon","evening","night"),
+      ordered_result = FALSE)
+
+traffic_test$time2 <-  as.numeric(as.character(traffic_test$time))
+traffic_test$time2 <- 
+  cut(traffic_test$time2, 
+      breaks= c(0,6,11,15,18,22,24), 
+      include.lowest = TRUE,
+      labels=c("night","morning","midday","afternoon","evening","night"),
+      ordered_result = FALSE)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+traffic_train_train %>% 
+  group_by(yearweek) %>% 
+  summarise(AvgTraffic_bc=mean(traffic, na.rm=T),
+            Count=n()) %>% 
+  arrange(desc(AvgTraffic_bc))
+```
+
+
+
+### Variables selection
+
+In the next step, we removed the columns that we decided not to use in our analyses.
+
+```{r message=FALSE, warning=FALSE}
+other_col <- c("date_time", "clouds_coverage_pct", "DateT", "date", "weekend","weather-detailed")
+traffic_variables_all <- colnames(traffic_train_train)
+traffic_variables_in <- traffic_variables_all[!(traffic_variables_all %in% other_col)]
+```
+
+All of the column names were divided into two groups according to their type: numeric or factor.
+
+```{r message=FALSE, warning=FALSE}
+traffic_numeric_vars <- 
+  sapply(traffic_train_train[,which(colnames(traffic_train_train) %in% traffic_variables_in)], is.numeric) %>% 
+  which() %>% 
+  names()
+
+traffic_factor_vars <- 
+  sapply(traffic_train_train[,which(colnames(traffic_train_train) %in% traffic_variables_in)], is.factor) %>% 
+  which() %>% 
+  names()
+```
+
+Using the first group we calculated the correlation matrix. The most correlated feature with the traffic level is temperature. It shouldn't surprise us that the temperature is also correlated with the amount of rain reported and year (global warming).
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_correlations <- 
+  cor(traffic_train_train[, traffic_numeric_vars],
+      use = "pairwise.complete.obs")
+
+traffic_numeric_vars_order <- 
+  # we take correlations with the traffic
+  traffic_correlations[,"traffic"] %>% 
+  # sort them in the decreasing order
+  sort(decreasing = TRUE) %>%
+  # end extract just variables' names
+  names()
+
+corrplot.mixed(traffic_correlations[traffic_numeric_vars_order[-2], 
+                                    traffic_numeric_vars_order[-2]],
+               upper = "square",
+               lower = "number",
+               tl.col = "black", # color of labels (variable names)
+               tl.pos = "lt")  # position of labels (lt = left and top)
+
+```
+
+We measured the strength of the relationships between features and the target variable using the ANOVA models.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_categorical_vars <- 
+  # check if variable is a factor
+  sapply(traffic_train_train, is.factor) %>% 
+  # select those which are
+  which() %>% 
+  # and keep just their names
+  names()
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_F_anova <- function(categorical_var) {
+  anova_ <- aov(traffic_train_train$traffic ~ 
+                  traffic_train_train[[categorical_var]]) 
+  
+  return(summary(anova_)[[1]][1, 4])
+}
+
+traffic_anova_all_categorical <- sapply(traffic_categorical_vars,
+       traffic_F_anova) %>% 
+  # in addition lets sort them
+  # in the decreasing order of F
+  #  and store as an object
+  sort(decreasing = TRUE)
+
+traffic_anova_all_categorical
+```
+
+We had two groups of similar variables: weekend / weekday and month / yearweek / season
+based on the anova analysis we'll leave weekend and season which F statistics is higher
+
+The strongest relations with the target variable were presented using boxplots.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+g1 <- ggplot(traffic_train_train, aes(x = time2, y = traffic)) + geom_boxplot(fill = "grey") + theme_classic()
+g2 <- ggplot(traffic_train_train, aes(x = season,y = traffic)) + geom_boxplot(fill = "grey") + theme_classic()
+g3 <- ggplot(traffic_train_train, aes(x = weekend,y = traffic)) + geom_boxplot(fill = "grey") + theme_classic()
+g4 <- ggplot(traffic_train_train, aes(x=clouds_pct_qntls,y=traffic)) + geom_boxplot(fill="grey") + theme_classic()
+grid.arrange(g1,g2,g3,g4,ncol=2)
+
+```
+
+#### Zero or near zero variance
+
+Only two predictors were classified as the near-variance features - rain_mm and snow_mm. As presented above the snow was a very rare event in our dataset. Changing it into a binary variable would have not been very productive, as a similar characteristic was already defined as a level (weather_general feature). Rain_mm was a more informative variable, so we decided to leave it in our model.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE  }
+nearZeroVar(traffic_train_train,
+            saveMetrics = TRUE) -> traffic_nzv_stats
+
+traffic_nzv_stats %>% 
+  # we add rownames of the frame
+  # (with names of variables)
+  # as a new column in the data
+  rownames_to_column("variable") %>% 
+  # and sort it in the descreasing order
+  arrange(-zeroVar, -nzv, -freqRatio)
+```
+
+Taking all results into account we decided to create 3 sets of variables and test their performance.
+
+The first one was based on the grouped features, the second one used mostly ungrouped features and the third one was mixed.
+
+```{r message=FALSE, warning=FALSE}
+selected1 <- c("weather_general2","clouds_pct_qntls", "temperature", "rain_mm",
+               "time2", "season", "year", "weekend","traffic", "traffic_boxcox")
+
+selected2 <- c("weather_general2","clouds_pct_qntls", "temperature", "rain_mm",
+               "time", "month", "year", "weekday", "yearweek", "traffic", "traffic_boxcox")
+
+selected3 <- c("weather_general2","clouds_pct_qntls", "temperature", "rain_mm",
+               "time2", "season", "year", "weekend","traffic", "traffic_boxcox", "yearweek")
+```
+
+
+```{r message=FALSE, warning=FALSE, results="hide", echo=FALSE}
+traffic_var1_train <- traffic_train_train[,which(colnames(traffic_train_train) %in% selected1)]
+traffic_var1_test <- traffic_train_test[,which(colnames(traffic_train_test) %in% selected1)]
+
+traffic_var2_train <- traffic_train_train[,which(colnames(traffic_train_train) %in% selected2)]
+traffic_var2_test <- traffic_train_test[,which(colnames(traffic_train_test) %in% selected2)]
+
+traffic_var3_train <- traffic_train_train[,which(colnames(traffic_train_train) %in% selected3)]
+traffic_var3_test <- traffic_train_test[,which(colnames(traffic_train_test) %in% selected3)]
+
+
+traffic_forecast_train <- data.frame(traffic=traffic_train_train$traffic)
+traffic_forecast_test <- data.frame(traffic=traffic_train_test$traffic)
+```
+
+
+### Cross-validation and performance measurement
+
+Because traffic dataset contained a time series data, we decided to use a time-based split for cross-validation. Using a "timeslice" method the test sample was divided into 5 slices, each containing 8000 observations.
+
+```{r message=FALSE, warning=FALSE, results="hide"}
+options(contrasts = c("contr.treatment",  # for non-ordinal factors
+                      "contr.treatment")) # for ordinal factors
+
+myTimeControl <- trainControl(method = "timeslice",
+                              initialWindow = 6000,
+                              horizon = 2000,
+                              fixedWindow = TRUE,
+                              skip=3000)
+```
+
+To calculate the model error for both training and test sample, we used the following function:
+
+```{r message=FALSE, warning=FALSE}
+regressionMetrics <- function(real, predicted) {
+  # Mean Square Error
+  MSE <- mean((real - predicted)^2)
+  # Root Mean Square Error
+  RMSE <- sqrt(MSE)
+  # Mean Absolute Error
+  MAE <- mean(abs(real - predicted))
+  # Mean Absolute Percentage Error
+  MAPE <- mean(abs(real - predicted)/real)
+  # R2
+  R2 <- cor(predicted, real)^2
+  
+  result <- data.frame(MSE, RMSE, MAE, MAPE, R2)
+  return(result)
+}
+```
+
+
+### Linear regression
+
+We calculated 4 simple linear models using different sets of features defined above. We also run one model with the defendant variable before the Box-Cox transformation.
+
+lm1 - traffic_boxcox ~ selected1 
+lm2 - traffic ~ selected1
+lm3 - traffic_boxcox ~ selected2
+lm4 - traffic_boxcox ~ selected3
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(987654321)
+traffic_lm1 <- train(traffic_boxcox ~ ., 
+                     data = traffic_var1_train %>% 
+                       # we exclude traffic
+                       dplyr::select(-traffic)
+                     ,
+                     method = "lm",
+                     #family = "binomial",
+                     metric = "RMSE",
+                     # and the new training control
+                     trControl = myTimeControl)
+
+traffic_forecast_train$traffic_forecast_lm1 <- (sapply(predict(traffic_lm1,traffic_var1_train), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                                  1)^(1/traffic_boxcox$lambda)
+
+traffic_forecast_test$traffic_forecast_lm1 <- (sapply(predict(traffic_lm1,traffic_var1_test), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                                 1)^(1/traffic_boxcox$lambda)
+lm1_train_results <- regressionMetrics(real = traffic_forecast_train$traffic+1,
+                  predicted = traffic_forecast_train$traffic_forecast_lm1)
+lm1_test_results <- regressionMetrics(real = traffic_forecast_test$traffic+1,
+                  predicted = traffic_forecast_test$traffic_forecast_lm1)
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_lm2 <- train(traffic ~ ., 
+                     data = traffic_var1_train %>% 
+                       # we exclude traffic
+                       dplyr::select(-traffic_boxcox)
+                     ,
+                     method = "lm",
+                     #family = "binomial",
+                     metric = "RMSE",
+                     # and the new training control
+                     trControl = myTimeControl)
+
+traffic_forecast_train$traffic_forecast_lm2 <- sapply(predict(traffic_lm2,traffic_var1_train), function(x){max(0,x)})
+traffic_forecast_test$traffic_forecast_lm2 <- sapply(predict(traffic_lm2,traffic_var1_test), function(x){max(0,x)})
+
+lm2_train_results <- regressionMetrics(real = traffic_forecast_train$traffic+1,
+                  predicted = traffic_forecast_train$traffic_forecast_lm2)
+lm2_test_results <- regressionMetrics(real = traffic_forecast_test$traffic+1,
+                  predicted = traffic_forecast_test$traffic_forecast_lm2)
+```
+
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_lm3 <- train(traffic_boxcox ~ ., 
+                     data = traffic_var2_train %>% 
+                       # we exclude traffic
+                       dplyr::select(-traffic)
+                     ,
+                     method = "lm",
+                     #family = "binomial",
+                     metric = "RMSE",
+                     # and the new training control
+                     trControl = myTimeControl)
+
+traffic_forecast_train$traffic_forecast_lm3 <- (sapply(predict(traffic_lm3,traffic_var2_train), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                             1)^(1/traffic_boxcox$lambda)
+
+traffic_forecast_test$traffic_forecast_lm3 <- (sapply(predict(traffic_lm3,traffic_var2_test), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                            1)^(1/traffic_boxcox$lambda)
+lm3_train_results <- regressionMetrics(real = traffic_forecast_train$traffic+1,
+                  predicted = traffic_forecast_train$traffic_forecast_lm3)
+lm3_test_results <- regressionMetrics(real = traffic_forecast_test$traffic+1,
+                  predicted = traffic_forecast_test$traffic_forecast_lm3)
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_lm4 <- train(traffic_boxcox ~ ., 
+                     data = traffic_var3_train %>% 
+                       # we exclude traffic
+                       dplyr::select(-traffic)
+                     ,
+                     method = "lm",
+                     #family = "binomial",
+                     metric = "RMSE",
+                     # and the new training control
+                     trControl = myTimeControl)
+
+traffic_forecast_train$traffic_forecast_lm4 <- (sapply(predict(traffic_lm4,traffic_var3_train), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                             1)^(1/traffic_boxcox$lambda)
+
+traffic_forecast_test$traffic_forecast_lm4 <- (sapply(predict(traffic_lm4,traffic_var3_test), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                            1)^(1/traffic_boxcox$lambda)
+
+lm4_train_results <- regressionMetrics(real = traffic_forecast_train$traffic+1,
+                  predicted = traffic_forecast_train$traffic_forecast_lm4)
+lm4_test_results <- regressionMetrics(real = traffic_forecast_test$traffic+1,
+                  predicted = traffic_forecast_test$traffic_forecast_lm4)
+```
+
+Looking at MAPE results, we can conclude that the best results were obtained using the last model, however adding ungrouped featured allowed to obtain better R2 of our model.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+comparison_traffic <- do.call(rbind, list(lm1_train_results, lm1_test_results, lm2_train_results, lm2_test_results, lm3_train_results, lm3_test_results, lm4_train_results, lm4_test_results))
+rownames(comparison_traffic) <- c("lm1_train", "lm1_test", "lm2_train", "lm2_test", "lm3_train", "lm3_test", "lm4_train", "lm4_test") 
+comparison_traffic
+
+lm_train_results <- lm4_train_results
+lm_test_results <- lm4_test_results
+```
+
+```{r message=FALSE, warning=FALSE}
+summary(traffic_lm4)
+```
+
+### KNN
+
+
+The KNN model was based on the third feature selection. The predicted error was the lowest among the calculated KNN models. Our first hyperparameter k is defined by the square root of 20k observation we were using ~ 141.
+
+```{r message=FALSE, warning=FALSE}
+different_k3 <- data.frame(k = seq(1, 150, 10))
+
+traffic_knn3 <- 
+  train(traffic_boxcox ~ ., 
+        data = traffic_var3_train %>% 
+          # we exclude traffic
+          dplyr::select(-traffic)
+        ,
+        # model type - now knn!!
+        method = "knn",
+        # validation used!
+        trControl = myTimeControl,
+        # parameters to be compared
+        tuneGrid = different_k3,
+        metric = "RMSE",
+        preProcess = c("range"))
+```
+
+In the second step we narrowed the range for our parameter k.
+
+```{r message=FALSE, warning=FALSE}
+different_k3b <- data.frame(k = seq(1,20, 1))
+
+traffic_knn3b <- 
+  train(traffic_boxcox ~ ., 
+        data = traffic_var3_train %>% 
+          # we exclude traffic
+          dplyr::select(-traffic)
+        ,
+        # model type - now knn!!
+        method = "knn",
+        # validation used!
+        trControl = myTimeControl,
+        # parameters to be compared
+        tuneGrid = different_k3b,
+        metric = "RMSE",
+        preProcess = c("range"))
+
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+g1 <- plot(traffic_knn3)
+g2 <- plot(traffic_knn3b)
+grid.arrange(g1,g2,ncol=2)
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+traffic_forecast_train$traffic_forecast_knn3b <-(sapply(predict(traffic_knn3b,traffic_var3_train), function(x){max(0,x)})*traffic_boxcox$lambda+1)^(1/traffic_boxcox$lambda)
+
+traffic_forecast_test$traffic_forecast_knn3b <-(sapply(predict(traffic_knn3b,traffic_var3_test), function(x){max(0,x)})*traffic_boxcox$lambda+1)^(1/traffic_boxcox$lambda)
+
+knn3b_train_results <- regressionMetrics(real = traffic_forecast_train$traffic+1,
+                  predicted = traffic_forecast_train$traffic_forecast_knn3b)
+knn3b_test_results <- regressionMetrics(real = traffic_forecast_test$traffic+1,
+                  predicted = traffic_forecast_test$traffic_forecast_knn3b)
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+comparison_traffic <- do.call(rbind, list(knn3b_train_results, knn3b_test_results))
+rownames(comparison_traffic) <- c("knn3b_train", "knn3b_test") 
+comparison_traffic
+
+knn_train_results <- knn3b_train_results
+knn_test_results <- knn3b_test_results
+```
+
+### LASSO Regression and Elastic net
+
+The Lasso regression performs a regularization, which adds a penalty equal to the absolute value of the magnitude of coefficients. It encourages simple models with fewer parameters. 
+At the beginning we checked the lambda parameters from 10 to 1000.
+
+```{r message=FALSE, warning=FALSE}
+parameters_lasso <- expand.grid(alpha = 1,
+                                lambda = seq(10, 1e3, 10))
+
+set.seed(123456789)
+
+traffic_lasso1 <-  train(traffic_boxcox ~ .,
+                         data = traffic_var3_train %>% 
+                           # we exclude traffic
+                           dplyr::select(-traffic)
+                         ,
+                         method = "glmnet", 
+                         tuneGrid = parameters_lasso,
+                         trControl = myTimeControl)
+```
+
+The smallest results are observed in the very left tail of our graph, therefore, we decreased to narrow our lambda range to see the details.
+
+```{r message=FALSE, warning=FALSE, results="hide"}
+parameters_lasso2 <- expand.grid(alpha = 1,
+                                lambda = seq(0, 100, 1))
+set.seed(123456789)
+
+traffic_lasso2 <-  train(traffic_boxcox ~ .,
+                         data = traffic_var3_train %>% 
+                           # we exclude traffic
+                           dplyr::select(-traffic)
+                         ,
+                         method = "glmnet", 
+                         tuneGrid = parameters_lasso2,
+                         trControl = myTimeControl)
+```
+
+
+```{r message=FALSE, warning=FALSE, fig.height=3}
+g1 <- plot(traffic_lasso1)
+g2 <- plot(traffic_lasso2)
+grid.arrange(g1,g2,ncol=2)
+```
+
+```{r message=FALSE, warning=FALSE}
+traffic_lasso2$bestTune
+```
+
+The smallest error was obtained for a very small lambda, almost equal to 0. Which means that the OLS (Ordinary Least Squares) solution was probably within the budget created by the lasso regression and the OLS model results were very close to the LASSO regression results. 
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+traffic_forecast_train$traffic_forecast_lasso2 <-(sapply(predict(traffic_lasso2,traffic_var3_train), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                                1)^(1/traffic_boxcox$lambda)
+
+traffic_forecast_test$traffic_forecast_lasso2 <-(sapply(predict(traffic_lasso2,traffic_var3_test), function(x){max(0,x)})*traffic_boxcox$lambda+
+                                               1)^(1/traffic_boxcox$lambda)
+
+lasso_train_results <- regressionMetrics(real = traffic_forecast_train$traffic+1,
+                  predicted = traffic_forecast_train$traffic_forecast_lasso2)
+lasso_test_results <- regressionMetrics(real = traffic_forecast_test$traffic+1,
+                  predicted = traffic_forecast_test$traffic_forecast_lasso2)
+
+```
+
+We also checked if the elastic net approach would have given us better results. 
+
+```{r message=FALSE, warning=FALSE, results="hide"}
+
+parameters_elastic <- expand.grid(alpha = seq(0, 1, 0.2), 
+                                  lambda = seq(0, 1e2, 1))
+set.seed(123456789)
+
+traffic_elastic1 <- train(traffic_boxcox ~ .,
+                          data = traffic_var3_train %>% 
+                            # we exclude traffic
+                            dplyr::select(-traffic)
+                          ,
+                          method = "glmnet", 
+                          tuneGrid = parameters_elastic,
+                          trControl = myTimeControl)
+```
+
+
+```{r message=FALSE, warning=FALSE, fig.height=5}
+g1 <- plot(traffic_elastic1)
+
+grid.arrange(g1,ncol=2)
+```
+
+```{r message=FALSE, warning=FALSE}
+traffic_lasso1$bestTune
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+traffic_forecast_train$traffic_forecast_elastic1 <-(sapply(predict(traffic_elastic1,traffic_var3_train), function(x){max(0,x)})*traffic_boxcox$lambda+1)^(1/traffic_boxcox$lambda)
+
+traffic_forecast_test$traffic_forecast_elastic1 <-(sapply(predict(traffic_elastic1,traffic_var3_test), function(x){max(0,x)})*traffic_boxcox$lambda+1)^(1/traffic_boxcox$lambda)
+
+elastic_train_results <- regressionMetrics(real = traffic_forecast_train$traffic+1,
+                  predicted = traffic_forecast_train$traffic_forecast_elastic1)
+elastic_test_results <- regressionMetrics(real = traffic_forecast_test$traffic+1,
+                  predicted = traffic_forecast_test$traffic_forecast_elastic1)
+
+```
+
+The results we obtained were not very satisfying.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+comparison_traffic <- do.call(rbind, list(lasso_train_results, lasso_test_results, elastic_train_results, elastic_test_results))
+rownames(comparison_traffic) <- c("lasso_train", "lasso_test", "elastic_train", "elastic_test") 
+comparison_traffic
+
+```
+
+### Model comparison and selection
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+comparison_traffic <- do.call(rbind, list(lm_train_results,knn_train_results,lasso_train_results,elastic_train_results,
+                    lm_test_results,knn_test_results,lasso_test_results,elastic_test_results))
+rownames(comparison_traffic) <- c("lm_train", "knn_train", "lasso_train", "elastic_train", "lm_test", "knn_test", "lasso_test", "elastic_test") 
+comparison_traffic
+```
+
+The interpretation of the results was not straightforward. For MAPE, the KNN model turned out to be the most optimal. On the other hand, it achieved a small R2 as well as high absolute errors. If we took a different measure as selection criteria, then probably the linear model would be the optimal one.
+
+At the end we decided to use for forecasting the KNN model with k=8.
+
+The comparison between the predicted and real traffic values, for both the train and the test sample, is presented below: 
+
+```{r message=FALSE, warning=FALSE, echo=FALSE, fig.height=4}
+g1 <- ggplot(traffic_forecast_train,
+       aes(x = traffic_forecast_knn3b,
+           y = traffic)) +
+  geom_point(col = "grey") +
+  geom_smooth(method = "lm", se = FALSE)  + theme_classic()
+g2 <- ggplot(traffic_forecast_test,
+       aes(x = traffic_forecast_knn3b,
+           y = traffic)) +
+  geom_point(col = "grey") +
+  geom_smooth(method = "lm", se = FALSE)  + theme_classic()
+grid.arrange(g1,g2,ncol=2)
+
+```
+
+It is worth mentioning that the error measured on the test sample was much higher than on the the training data. Therefore we don't expect the results to be very accurate, the MAPE will probably be close to 5.
+
