@@ -1,0 +1,546 @@
+# Libraries
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(caret)
+library(tibble)
+library(purrr)
+library(corrplot)
+library(DescTools)
+library(glmnet)
+library(AER)
+library(lmtest)
+library(nnet)
+library(pROC)
+library(ROSE)
+library(janitor)
+#install.packages("remotes")
+#remotes::install_github("cran/DMwR")
+library(DMwR)
+library(bestNormalize)
+library(Information)
+library(smbinning)
+library(lattice)
+library(ggplot2)
+library(woeBinning)
+
+# Firstly, we loaded the data, checked how they look like and whether there are any missing
+# observations.
+
+# No data missing
+drugs <- read_csv("drugs_train.csv")
+drugs_to_test <- read_csv("drugs_test.csv")
+any(is.na(drugs))
+glimpse(drugs)
+
+# As some of the variables are stored as characters, we needed to convert it to factors.
+# 
+
+
+
+
+
+
+#### PRZEKSZTAŁCANIE ZMIENNYCH ####
+
+# Categorical variables
+drugs$gender <- as.factor(drugs$gender)
+drugs$country <- as.factor(drugs$country)
+drugs$ethnicity <- as.factor(drugs$ethnicity)
+drugs$consumption_cocaine_last_month <- as.factor(drugs$consumption_cocaine_last_month)
+
+
+
+# Ordinal variables
+# After investigating distribution of variables, I decided to combine selected 
+# categories in order to []
+drugs$age[drugs$age == "65+"] <- "55-64"
+drugs$age[drugs$age == "55-64"] <- "55+"
+drugs$age <- factor(drugs$age, # levels from lowest to highest
+                    levels = c("18-24", "25-34", "35-44", "45-54", "55+"),
+                    ordered = TRUE)
+table(drugs$age)
+drugs$age <- droplevels(drugs$age)
+
+drugs$education[drugs$education == "Left school before 16 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Left school at 16 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Left school at 17 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Left school at 18 years"] <- "Left school at/before 18 years"
+drugs$education[drugs$education == "Masters degree"] <- "Masters degree or higher"
+drugs$education[drugs$education == "Doctorate degree"] <- "Masters degree or higher"
+table(drugs$education)
+drugs$education <- factor(drugs$education,
+                          levels = c("Left school at/before 18 years",
+                                     "Some college or university, no certificate or degree",
+                                     "Professional certificate/ diploma",
+                                     "University degree",
+                                     "Masters degree or higher"),
+                          ordered = TRUE)
+drugs$education <- droplevels(drugs$education)
+
+drugs$consumption_alcohol <- factor(drugs$consumption_alcohol,
+                                    levels = c("never used",
+                                               "used over a decade ago",
+                                               "used in last decade",
+                                               "used in last year",
+                                               "used in last month",
+                                               "used in last week", 
+                                               "used in last day"),
+                                    ordered = TRUE)
+drugs$consumption_amphetamines <- factor(drugs$consumption_amphetamines,
+                                         levels = c("never used",
+                                                    "used over a decade ago",
+                                                    "used in last decade",
+                                                    "used in last year",
+                                                    "used in last month",
+                                                    "used in last week", 
+                                                    "used in last day"),
+                                         ordered = TRUE)
+drugs$consumption_caffeine <- factor(drugs$consumption_caffeine,
+                                     levels = c("never used",
+                                                "used over a decade ago",
+                                                "used in last decade",
+                                                "used in last year",
+                                                "used in last month",
+                                                "used in last week", 
+                                                "used in last day"),
+                                     ordered = TRUE)
+drugs$consumption_cannabis <- factor(drugs$consumption_cannabis,
+                                     levels = c("never used",
+                                                "used over a decade ago",
+                                                "used in last decade",
+                                                "used in last year",
+                                                "used in last month",
+                                                "used in last week", 
+                                                "used in last day"),
+                                     ordered = TRUE)
+drugs$consumption_chocolate <- factor(drugs$consumption_chocolate,
+                                      levels = c("never used",
+                                                 "used over a decade ago",
+                                                 "used in last decade",
+                                                 "used in last year",
+                                                 "used in last month",
+                                                 "used in last week", 
+                                                 "used in last day"),
+                                      ordered = TRUE)
+drugs$consumption_mushrooms <- factor(drugs$consumption_mushrooms,
+                                      levels = c("never used",
+                                                 "used over a decade ago",
+                                                 "used in last decade",
+                                                 "used in last year",
+                                                 "used in last month",
+                                                 "used in last week", 
+                                                 "used in last day"),
+                                      ordered = TRUE)
+drugs$consumption_nicotine <- factor(drugs$consumption_nicotine,
+                                     levels = c("never used",
+                                                "used over a decade ago",
+                                                "used in last decade",
+                                                "used in last year",
+                                                "used in last month",
+                                                "used in last week", 
+                                                "used in last day"),
+                                     ordered = TRUE)
+
+drugs$consumption_alcohol[drugs$consumption_alcohol == "never used"] <- "used over a decade ago"
+drugs$consumption_alcohol[drugs$consumption_alcohol == "used in last day"] <- "used in last week"
+drugs$consumption_alcohol <- droplevels(drugs$consumption_alcohol)
+
+drugs$consumption_amphetamines[drugs$consumption_amphetamines == "never used"] <- "used over a decade ago"
+drugs$consumption_amphetamines[drugs$consumption_amphetamines == "used in last day"] <- "used in last week"
+drugs$consumption_amphetamines <- droplevels(drugs$consumption_amphetamines)
+
+drugs$consumption_caffeine[drugs$consumption_caffeine == "never used"] <- "used over a decade ago"
+drugs$consumption_caffeine[drugs$consumption_caffeine == "used in last day"] <- "used in last week"
+drugs$consumption_caffeine <- droplevels(drugs$consumption_caffeine)
+
+drugs$consumption_cannabis[drugs$consumption_cannabis == "never used"] <- "used over a decade ago"
+drugs$consumption_cannabis[drugs$consumption_cannabis == "used in last day"] <- "used in last week"
+drugs$consumption_cannabis <- droplevels(drugs$consumption_cannabis)
+
+drugs$consumption_chocolate[drugs$consumption_chocolate == "never used"] <- "used over a decade ago"
+drugs$consumption_chocolate[drugs$consumption_chocolate == "used in last day"] <- "used in last week"
+drugs$consumption_chocolate <- droplevels(drugs$consumption_chocolate)
+
+drugs$consumption_mushrooms[drugs$consumption_mushrooms == "never used"] <- "used over a decade ago"
+drugs$consumption_mushrooms[drugs$consumption_mushrooms == "used in last day"] <- "used in last week"
+drugs$consumption_mushrooms <- droplevels(drugs$consumption_mushrooms)
+
+drugs$consumption_nicotine[drugs$consumption_nicotine == "never used"] <- "used over a decade ago"
+drugs$consumption_nicotine[drugs$consumption_nicotine == "used in last day"] <- "used in last week"
+drugs$consumption_nicotine <- droplevels(drugs$consumption_nicotine)
+
+glimpse(drugs)
+table(drugs$consumption_nicotine)
+
+# For personality, data seems more or less symmetrically distributed so 
+# we decided not to transform those
+hist(drugs$personality_neuroticism)
+# Change the command for other variables
+
+
+###### Training and test samples ######
+drugs_which_training <- createDataPartition(drugs$consumption_cocaine_last_month,
+                                            p = 1099/1500, 
+                                            list = FALSE) 
+
+drugs_train <- drugs[c(drugs_which_training),]
+drugs_test <- drugs[-c(drugs_which_training),]
+
+
+
+#### BALANCING SAMPLE ####
+
+fiveStats <- function(...) c(twoClassSummary(...), 
+                             defaultSummary(...))
+# in the twoClassSummary() the first level
+# of the dependent variable is automatically 
+# assumed as the level of "success" and 
+# sensitivity refers to it
+
+ctrl_cv5 <- trainControl(method = "cv",
+                         number = 5,
+                         classProbs = TRUE,
+                         # and use it in trControl
+                         summaryFunction = fiveStats)
+# and use it in model estimation
+
+set.seed(987654321)
+
+# Model
+drugs_logit_train <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train %>% 
+          # we exclude customerID
+          dplyr::select(-id), 
+        # model type
+        method = "glm",
+        # family of models
+        family = "binomial",
+        # train control
+        trControl = ctrl_cv5)
+
+drugs_logit_train
+
+
+###### Weighning observations ######
+
+(freqs <- table(drugs_train$consumption_cocaine_last_month))
+
+myWeights <- ifelse(drugs_train$consumption_cocaine_last_month == "Yes",
+                    0.5/freqs[2], 
+                    0.5/freqs[1]) * nrow(drugs_train)
+
+tabyl(myWeights)
+
+sum(myWeights) == nrow(drugs_train)
+
+# and estimate the model with weights
+
+set.seed(987654321)
+
+drugs_logit_train_weighted <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train %>% 
+          dplyr::select(-id), 
+        # model type
+        method = "glm",
+        # family of models
+        family = "binomial",
+        # train control
+        trControl = ctrl_cv5,
+        # we add weights
+        weights = myWeights)
+
+# lets see the result
+drugs_logit_train_weighted
+
+# Specisifity drastically improved, as well as ROC and Kappa but Accuracy and Sensibility lower
+
+
+###### Upsampling ######
+# We do not use downsampling as the number of observations is not large
+
+ctrl_cv5$sampling <- "up"
+
+set.seed(987654321)
+
+drugs_logit_train_up <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train %>% 
+          dplyr::select(-id), 
+        # model type
+        method = "glm",
+        # family of models
+        family = "binomial",
+        # train control
+        trControl = ctrl_cv5
+        )
+
+# lets see the result
+
+drugs_logit_train_up
+
+
+###### SMOTE model #####
+
+# we will use the SMOTE method in the same way
+
+ctrl_cv5$sampling <- "smote"
+
+set.seed(987654321)
+
+# as it takes longer, lets use smaller dataset
+# for training
+
+drugs_logit_train_smote <- 
+  train(consumption_cocaine_last_month ~ ., 
+        data = drugs_train %>% 
+          dplyr::select(-id), 
+        # model type
+        method = "glm",
+        # family of models
+        family = "binomial",
+        # train control
+        trControl = ctrl_cv5
+  )
+
+# which takes a bit longer
+# lets see the result
+
+drugs_logit_train_smote
+
+# seems to be better than up/down sampling
+
+# I don't do ROSE as it was getting errors and could not estimate the model
+# Although trying to debug
+
+
+###### Comparison ######
+
+models_all <- ls(pattern = "drugs_logit_train")
+
+models_all
+
+# remember that if the object name is stored
+# as a string one can easily access this object
+# with the get function:
+
+get("drugs_logit_train_weighted")
+
+# not lets use this knowledge to get 
+# the direct comparison of models
+
+sapply(models_all,
+       function(x) (get(x))$results[,2:6]) %>% 
+  # transposition in the end to have
+  # models in rows and statistics in columns
+  t()
+
+# lets also compare the results on 
+# the full training and test sample
+
+# we can use a function that for a trained model 
+# - result of the train() function,
+# will return selected measures
+
+source("functions/F_summary_binary_class.R")
+
+# full training data
+
+# lets show an example for a selected model
+
+models_all %>% 
+  sapply(function(x) get(x) %>% 
+           # use it for prediction
+           # in the TRAIN sample
+           predict(newdata = drugs_train) %>% 
+           # apply the summary
+           summary_binary_class(level_positive = "Yes",
+                                level_negative = "No",
+                                real = drugs_train$consumption_cocaine_last_month)) %>% 
+  # transpose the result to # have models in rows
+  t()
+
+# and do the same for the TEST data
+
+models_all <- ls(pattern = "drugs_logit_train")
+
+models_all
+
+# remember that if the object name is stored
+# as a string one can easily access this object
+# with the get function:
+
+get("drugs_logit_train_weighted")
+
+# not lets use this knowledge to get 
+# the direct comparison of models
+
+sapply(models_all,
+       function(x) (get(x))$results[,2:6]) %>% 
+  # transposition in the end to have
+  # models in rows and statistics in columns
+  t()
+
+# lets also compare the results on 
+# the full training and test sample
+
+# we can use a function that for a trained model 
+# - result of the train() function,
+# will return selected measures
+
+source("functions/F_summary_binary_class.R")
+
+# full training data
+
+# lets show an example for a selected model
+
+models_all %>% 
+  sapply(function(x) get(x) %>% 
+           # use it for prediction
+           # in the TRAIN sample
+           predict(newdata = drugs_train) %>% 
+           # apply the summary
+           summary_binary_class(level_positive = "Yes",
+                                level_negative = "No",
+                                real = drugs_train$consumption_cocaine_last_month)) %>% 
+  # transpose the result to # have models in rows
+  t()
+
+# and do the same for the TEST data
+
+models_all %>% 
+  sapply(function(x) get(x) %>% 
+           # use it for prediction
+           # in the TEST sample
+           predict(newdata = drugs_test) %>% 
+           # apply the summary
+           summary_binary_class(level_positive = "Yes",
+                                level_negative = "No",
+                                real = drugs_test$consumption_cocaine_last_month)) %>% 
+  # transpose the result to # have models in rows
+  t()
+models_all %>% 
+  sapply(function(x) get(x) %>% 
+           # use it for prediction
+           # in the TEST sample
+           predict(newdata = drugs_test) %>% 
+           # apply the summary
+           summary_binary_class(level_positive = "Yes",
+                                level_negative = "No",
+                                real = drugs_test$consumption_cocaine_last_month)) %>% 
+  # transpose the result to # have models in rows
+  t()
+
+# Choosing upsampling model (the highest Balanced Accuracy and relative high other
+# performance measures)
+
+
+
+#### RIDGE AND LASSO ####
+
+options(contrasts = c("contr.treatment",  
+                      "contr.treatment"))
+
+ctrl_cv5 <- trainControl(method = "cv",
+                         number = 5)
+ctrl_cv5$sampling <- "up"
+
+lambdas <- exp(log(10)*seq(-4, 5, length.out = 200))
+
+drugs_variables_all <- names(drugs_train)
+drugs_variables_all <- 
+  drugs_variables_all[-which(drugs_variables_all %in% c("id"))]
+
+
+###### Ridge ######
+
+parameters_ridge <- expand.grid(alpha = 0, # ridge 
+                                lambda = lambdas)
+
+set.seed(987654321)
+drugs_ridge <- train(consumption_cocaine_last_month ~ .,
+                      data = drugs_train %>% 
+                        dplyr::select(all_of(drugs_variables_all)),
+                      method = "glmnet", 
+                      family = "binomial",
+                      tuneGrid = parameters_ridge,
+                      trControl = ctrl_cv5)
+
+drugs_ridge
+plot(drugs_ridge)
+# Accuracy increaseases with lambda but not much after a certain point
+
+lambdas2 <- exp(log(10)*seq(-4, 2.5, length.out = 200))
+parameters_ridge2 <- expand.grid(alpha = 0, # ridge 
+                                lambda = lambdas2)
+
+set.seed(987654321)
+drugs_ridge <- train(consumption_cocaine_last_month ~ .,
+                     data = drugs_train %>% 
+                       dplyr::select(all_of(drugs_variables_all)),
+                     method = "glmnet", 
+                     family = "binomial",
+                     tuneGrid = parameters_ridge2,
+                     trControl = ctrl_cv5)
+
+drugs_ridge
+plot(drugs_ridge)
+# This point is around lambda = 220 let's say
+
+predict(drugs_ridge$finalModel, # stored model
+        s = 220, # lambda
+        type = "coefficients")
+# Hmm wychodzi na to że wszystko poza intercept nie ma znaczenia ale cóż:))
+predict(drugs_ridge$finalModel, # stored model
+        s = 0, # lambda
+        type = "coefficients")
+?train
+
+
+##### Lasso #####
+
+lambdas2 <- exp(log(10)*seq(-8, -1, length.out = 200))
+parameters_lasso <- expand.grid(alpha = 1,
+                                lambda = lambdas2)
+
+set.seed(123456789)
+
+drugs_lasso <-  train(consumption_cocaine_last_month ~ .,
+                       data = drugs_train %>% 
+                         dplyr::select(all_of(drugs_variables_all)),
+                       method = "glmnet", 
+                       tuneGrid = parameters_lasso,
+                       trControl = ctrl_cv5)
+
+drugs_lasso
+drugs_lasso$bestTune$lambda
+plot(drugs_lasso)
+# Here similarly the best lambda = 0.1 after that Accuracy does not inrease
+
+predict(drugs_lasso$finalModel, # stored model
+        s = drugs_lasso$bestTune$lambda, # lambda
+        type = "coefficients")
+
+
+
+###### Comparison ######
+
+# Generally weird
+
+summary_binary_class(real = drugs_test$consumption_cocaine_last_month,
+                  predicted_classes = predict(drugs_lasso, 
+                                      drugs_test)
+)
+
+# let's remind this summary for the ridge regression (and OLS)
+
+summary_binary_class(real = drugs_test$consumption_cocaine_last_month,
+                     predicted_classes = predict(drugs_logit_train_up, 
+                                                 drugs_test)
+)
+
+# Eee ridge and LASSO didn't improve accuracy I don't know what is happening in there
+
+
